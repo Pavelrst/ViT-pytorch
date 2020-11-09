@@ -19,6 +19,7 @@ from scipy import ndimage
 
 import models.configs as configs
 
+from .self_attention import MultiHeadSelfAttention, MultiHeadSelfAttentionEfficient
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,10 @@ class Block(nn.Module):
         self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn = Mlp(config)
-        self.attn = Attention(config)
+        # self.attn = Attention(config)
+        self.attn = MultiHeadSelfAttention(input_dim=config.hidden_size,
+                                           output_dim=config.hidden_size,
+                                           heads_num=config.transformer["num_heads"])
 
     def forward(self, x):
         h = x
