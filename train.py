@@ -15,13 +15,12 @@ import torch.distributed as dist
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from apex import amp
-from apex.parallel import DistributedDataParallel as DDP
 
 from models.modeling import VisionTransformer, CONFIGS
 from utils.scheduler import WarmupLinearSchedule, WarmupCosineSchedule
 from utils.data_utils import get_loader
 from utils.dist_util import get_world_size
-
+import matplotlib.pyplot as plt
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,9 @@ def setup(args):
     num_classes = 10 if args.dataset == "cifar10" else 100
 
     model = VisionTransformer(config, args.img_size, zero_head=True, num_classes=num_classes)
-    model.load_from(np.load(args.pretrained_dir))
+    # model.load_from(np.load(args.pretrained_dir))
+
+    dev = args.device
     model.to(args.device)
     num_params = count_parameters(model)
 
@@ -98,7 +99,7 @@ def valid(args, model, writer, test_loader, global_step):
     epoch_iterator = tqdm(test_loader,
                           desc="Validating... (loss=X.X)",
                           bar_format="{l_bar}{r_bar}",
-                          dynamic_ncols=True,
+                          dynamic_ncols=True, position=0, leave=True,
                           disable=args.local_rank not in [-1, 0])
     loss_fct = torch.nn.CrossEntropyLoss()
     for step, batch in enumerate(epoch_iterator):
@@ -166,8 +167,8 @@ def train(args, model):
         amp._amp_state.loss_scalers[0]._loss_scale = 2**20
 
     # Distributed training
-    if args.local_rank != -1:
-        model = DDP(model, message_size=250000000, gradient_predivide_factor=get_world_size())
+    # if args.local_rank != -1:
+    #     model = DDP(model, message_size=250000000, gradient_predivide_factor=get_world_size())
 
     # Train!
     logger.info("***** Running training *****")
@@ -187,9 +188,13 @@ def train(args, model):
         epoch_iterator = tqdm(train_loader,
                               desc="Training (X / X Steps) (loss=X.X)",
                               bar_format="{l_bar}{r_bar}",
-                              dynamic_ncols=True,
+                              dynamic_ncols=True, position=0, leave=True,
                               disable=args.local_rank not in [-1, 0])
         for step, batch in enumerate(epoch_iterator):
+            # img = batch[0][0].detach().numpy()
+            # img = np.transpose(img, (1,2,0))
+            # plt.imshow(img)
+            # plt.show()
             batch = tuple(t.to(args.device) for t in batch)
             x, y = batch
             loss = model(x, y)
@@ -241,22 +246,20 @@ def train(args, model):
 def main():
     parser = argparse.ArgumentParser()
     # Required parameters
-    parser.add_argument("--name", required=True,
+    parser.add_argument("--name", default="run0",
                         help="Name of this run. Used for monitoring.")
     parser.add_argument("--dataset", choices=["cifar10", "cifar100"], default="cifar10",
                         help="Which downstream task.")
     parser.add_argument("--model_type", type=str, default="ViT-B_16",
                         help="Which variant to use.")
-    parser.add_argument("--pretrained_dir", type=str, default="checkpoint/ViT-B_16.npz",
-                        help="Where to search for pretrained ViT models.")
     parser.add_argument("--output_dir", default="output", type=str,
                         help="The output directory where checkpoints will be written.")
 
-    parser.add_argument("--img_size", default=224, type=int,
+    parser.add_argument("--img_size", default=32, type=int,
                         help="Resolution size")
-    parser.add_argument("--train_batch_size", default=512, type=int,
+    parser.add_argument("--train_batch_size", default=1024, type=int,
                         help="Total batch size for training.")
-    parser.add_argument("--eval_batch_size", default=64, type=int,
+    parser.add_argument("--eval_batch_size", default=1024, type=int,
                         help="Total batch size for eval.")
     parser.add_argument("--eval_every", default=100, type=int,
                         help="Run prediction on validation set every so many steps."
@@ -266,7 +269,7 @@ def main():
                         help="The initial learning rate for SGD.")
     parser.add_argument("--weight_decay", default=0, type=float,
                         help="Weight deay if we apply some.")
-    parser.add_argument("--num_steps", default=500, type=int,
+    parser.add_argument("--num_steps", default=5000, type=int,
                         help="Total number of training epochs to perform.")
     parser.add_argument("--decay_type", choices=["cosine", "linear"], default="cosine",
                         help="How to decay the learning rate.")
